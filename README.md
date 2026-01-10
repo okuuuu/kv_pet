@@ -88,11 +88,53 @@ pytest
 pytest --cov=kv_pet
 ```
 
+## Anti-Bot Protection
+
+KV.ee uses **Cloudflare** protection that blocks automated HTTP requests with a JavaScript challenge.
+
+### Symptoms
+- HTTP 403 responses
+- "Just a moment..." challenge page
+- `cf-mitigated: challenge` header
+
+### Solutions
+
+**Option 1: Headless Browser with Stealth (Recommended)**
+```bash
+# Install playwright with stealth support
+pip install playwright playwright-stealth
+playwright install chromium
+sudo playwright install-deps chromium  # Install system dependencies
+
+# Now searches will automatically use headless browser with stealth mode
+kv-pet search --deal-type sale
+```
+
+**Option 2: Manual HTML Capture**
+1. Open the search page in your browser
+2. Right-click → "Save as" → "Webpage, HTML Only"
+3. Save to `tests/fixtures/kv_ee_search_results.html`
+4. Use the fixture for testing/development
+
+**Option 3: Disable Headless Fallback**
+```bash
+# Skip headless browser attempt (useful for debugging)
+kv-pet inspect https://www.kv.ee/en/search --no-headless
+```
+
+### Fixture Provenance
+
+Test fixtures should be captured from real kv.ee pages. Document the capture:
+- URL: `https://www.kv.ee/en/search?deal_type=1`
+- Timestamp: (when captured)
+- Notes: Any redactions of personal data
+
 ## Constraints
 
 - Respect kv.ee rate limits (2-5 second delay between requests)
-- The site may block automated requests; use `inspect` command to debug
+- The site blocks automated requests; headless browser fallback available
 - Parser selectors may need updating if site structure changes
+- Always test with real HTML fixtures when possible
 
 ## License
 

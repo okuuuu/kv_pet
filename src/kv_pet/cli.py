@@ -8,7 +8,7 @@ from .config import DEFAULT_CSV_PATH
 from .criteria import SearchCriteria
 from .csv_store import CsvStore
 from .fetcher import KvFetcher, build_search_url
-from .parser import KvParser, parse_pagination
+from .parser import KvParser
 
 
 def main() -> int:
@@ -52,6 +52,9 @@ Examples:
     search_parser.add_argument(
         "--dry-run", action="store_true", help="Show URL without fetching"
     )
+    search_parser.add_argument(
+        "--no-headless", action="store_true", help="Disable headless browser fallback"
+    )
 
     # Stats command
     stats_parser = subparsers.add_parser("stats", help="Show CSV statistics")
@@ -64,6 +67,9 @@ Examples:
     inspect_parser.add_argument("url", help="URL to inspect")
     inspect_parser.add_argument(
         "--save", type=Path, help="Save HTML to file"
+    )
+    inspect_parser.add_argument(
+        "--no-headless", action="store_true", help="Disable headless browser fallback"
     )
 
     args = parser.parse_args()
@@ -105,26 +111,39 @@ def cmd_search(args) -> int:
             print(build_search_url(criteria))
         return 0
 
+    use_headless = not getattr(args, "no_headless", False)
     store = CsvStore(args.output)
-    parser = KvParser(deal_type=args.deal_type)
+    html_parser = KvParser(deal_type=args.deal_type)
     all_listings = []
 
-    with KvFetcher() as fetcher:
+    with KvFetcher(use_headless_fallback=use_headless) as fetcher:
         for page in range(1, args.pages + 1):
             criteria.page = page
             url = build_search_url(criteria)
             print(f"Fetching page {page}: {url}")
 
-            try:
-                response = fetcher.fetch_search_results(criteria)
-                response.raise_for_status()
-            except Exception as e:
-                print(f"Error fetching page {page}: {e}", file=sys.stderr)
+            result = fetcher.fetch_search_results(criteria)
+
+            if result.is_blocked:
+                print(f"  BLOCKED: {result.block_reason}", file=sys.stderr)
+                if page == 1:
+                    print(
+                        "\nTip: The site uses Cloudflare protection. Options:\n"
+                        "  1. Install playwright: pip install playwright && playwright install chromium\n"
+                        "  2. Manually capture HTML and use as fixture\n"
+                        "  3. Try again later (rate limiting)",
+                        file=sys.stderr,
+                    )
+                    return 1
+                break
+
+            if result.status_code != 200:
+                print(f"  Error: HTTP {result.status_code}", file=sys.stderr)
                 if page == 1:
                     return 1
                 break
 
-            listings = parser.parse_search_results(response.text)
+            listings = html_parser.parse_search_results(result.html)
             print(f"  Found {len(listings)} listings")
             all_listings.extend(listings)
 
@@ -157,25 +176,35 @@ def cmd_stats(args) -> int:
 
 def cmd_inspect(args) -> int:
     """Inspect a URL and show/save HTML."""
-    with KvFetcher() as fetcher:
-        try:
-            response = fetcher.fetch_url(args.url)
-            print(f"Status: {response.status_code}")
-            print(f"Content-Type: {response.headers.get('content-type', 'unknown')}")
-            print(f"Content-Length: {len(response.text)} chars")
+    use_headless = not getattr(args, "no_headless", False)
 
-            if args.save:
-                args.save.write_text(response.text, encoding="utf-8")
-                print(f"Saved to: {args.save}")
-            else:
-                print("\n--- HTML Preview (first 2000 chars) ---")
-                print(response.text[:2000])
+    with KvFetcher(use_headless_fallback=use_headless) as fetcher:
+        result = fetcher.fetch_url(args.url)
 
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+        print(f"URL: {result.url}")
+        print(f"Status: {result.status_code}")
+        print(f"Blocked: {result.is_blocked}")
+        if result.block_reason:
+            print(f"Block reason: {result.block_reason}")
+        print(f"Content-Length: {len(result.html)} chars")
 
-    return 0
+        if result.is_blocked:
+            print(
+                "\nThe site blocked this request. Options:\n"
+                "  1. Install playwright: pip install playwright && playwright install chromium\n"
+                "  2. Manually save the page from your browser\n",
+                file=sys.stderr,
+            )
+
+        if args.save:
+            args.save.parent.mkdir(parents=True, exist_ok=True)
+            args.save.write_text(result.html, encoding="utf-8")
+            print(f"Saved to: {args.save}")
+        else:
+            print("\n--- HTML Preview (first 2000 chars) ---")
+            print(result.html[:2000])
+
+    return 0 if not result.is_blocked else 1
 
 
 if __name__ == "__main__":

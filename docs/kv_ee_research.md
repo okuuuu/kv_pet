@@ -4,9 +4,52 @@
 KV.ee is Estonia's leading real estate portal (since 1999). No public API available.
 
 ## Access Constraints
-- **Anti-bot protection**: Returns HTTP 403 for plain automated requests
-- **Requires**: Browser-like headers (User-Agent, Accept, etc.)
-- **Fallback**: May need headless browser if JS rendering is required
+
+### Cloudflare Protection (Confirmed 2026-01-10)
+- **Protection type**: Cloudflare JS Challenge
+- **Response**: HTTP 403 with challenge page
+- **Key headers**:
+  - `cf-mitigated: challenge`
+  - `server: cloudflare`
+  - `cf-ray: <ray-id>`
+- **Challenge page content**: "Just a moment..." with JS that must execute
+
+### What Doesn't Work
+- Plain HTTP requests (even with browser-like headers)
+- Adding Sec-Fetch-* headers
+- Adding Sec-CH-UA-* client hints
+- Cookie-based session persistence
+- Standard headless Playwright/Chromium (detected as bot)
+
+### What Works
+1. **playwright-stealth** - Successfully bypasses Cloudflare (tested 2026-01-10)
+   - Uses `playwright-stealth` library to mask automation signals
+   - Requires: `pip install playwright playwright-stealth && playwright install chromium`
+   - Also needs system deps: `sudo playwright install-deps chromium`
+2. **Manual browser capture** - for test fixtures
+
+### Stealth Configuration That Works
+```python
+from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
+
+browser = playwright.chromium.launch(
+    headless=True,
+    args=[
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+    ],
+)
+context = browser.new_context(
+    viewport={"width": 1920, "height": 1080},
+    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...",
+    locale="en-US",
+    timezone_id="Europe/Tallinn",
+)
+page = context.new_page()
+stealth_sync(page)  # Apply stealth patches
+```
 
 ## URL Patterns
 
@@ -42,24 +85,58 @@ https://www.kv.ee/en/search?<parameters>
 | `keyword` | Address/keyword search | string |
 
 ### Listing URL Pattern
-Individual listings appear to follow:
+Individual listings follow slug format with ID at end:
 ```
-https://www.kv.ee/<listing-id>.html
+https://www.kv.ee/en/<slug>-<listing-id>.html
+```
+Example: `/en/kirsioue-kaasaegne-ja-hubane-kodupaik-sakuskirsiou-3447874.html`
+
+## HTML Structure (Confirmed 2026-01-10)
+
+### Search Results Page
+```
+article[data-object-id][data-object-url]
+├── div.media (images carousel)
+├── div.actions (favorite, gallery buttons)
+├── div.description
+│   └── h2
+│       └── a[href*=".html"] (location/title)
+│   └── p.object-excerpt (description with floor info)
+├── div.rooms (number of rooms)
+├── div.area (area in m²)
+├── div.add-time (posted time)
+└── div.price
+    ├── (text) main price "165 990 €"
+    └── small (price per m²)
 ```
 
-## HTML Structure (to be confirmed)
-- Search results likely in a list/grid container
-- Each listing card contains: title, price, location, area, rooms, image
-- Listing ID embedded in URL or data attribute
+### Key Selectors
+- Listing container: `article[data-object-id]`
+- Listing ID: `data-object-id` attribute
+- Listing URL: `data-object-url` attribute
+- Title/Location: `.description h2 a[href*=".html"]`
+- Rooms: `div.rooms`
+- Area: `div.area`
+- Price: `div.price` (first text node)
+- Price/m²: `div.price small`
+- Floor info: `p.object-excerpt` (parse "Floor X/Y" pattern)
+- Property type: article class `object-type-apartment`, `object-type-house`, etc.
+- Build year: `p.object-excerpt` (parse "construction year YYYY")
+
+### Data Formats
+- Prices: "165 990 €" or "165\xa0990\xa0€" (non-breaking spaces)
+- Areas: "43.6 m²" or "43.6\xa0m²"
+- Floor: "Floor 3/4" in excerpt text
 
 ## Rate Limiting Strategy
 - Minimum 2-3 second delay between requests
 - Session reuse with cookies
-- Realistic User-Agent rotation
+- Realistic User-Agent
 - Respect any Retry-After headers
 
 ## Implementation Notes
-1. Start with requests + proper headers
-2. If 403 persists, try with browser automation (playwright/selenium)
-3. Parse HTML with BeautifulSoup4
-4. Extract listing data to structured format
+1. HTTP requests fail with 403 (Cloudflare)
+2. Standard headless browser detected as bot
+3. **playwright-stealth successfully bypasses protection**
+4. Parse HTML with BeautifulSoup4
+5. Extract listing data from `article[data-object-id]` elements

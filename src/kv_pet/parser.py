@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 
 from .config import BASE_URL
 
@@ -65,7 +65,8 @@ def normalize_price(price_str: str) -> Optional[int]:
     """Extract numeric price from string like '150 000 €' or '150,000€'."""
     if not price_str:
         return None
-    cleaned = re.sub(r"[^\d]", "", price_str)
+    # Remove non-breaking spaces and regular spaces
+    cleaned = re.sub(r"[^\d]", "", price_str.replace("\xa0", ""))
     return int(cleaned) if cleaned else None
 
 
@@ -73,7 +74,8 @@ def normalize_area(area_str: str) -> Optional[float]:
     """Extract area from string like '60.5 m²' or '60,5m2'."""
     if not area_str:
         return None
-    cleaned = area_str.replace(",", ".").replace("m²", "").replace("m2", "").strip()
+    # Handle non-breaking spaces
+    cleaned = area_str.replace("\xa0", " ").replace(",", ".").replace("m²", "").replace("m2", "").strip()
     cleaned = re.sub(r"[^\d.]", "", cleaned)
     try:
         return float(cleaned)
@@ -90,7 +92,12 @@ def normalize_int(value_str: str) -> Optional[int]:
 
 
 def extract_listing_id(url: str) -> Optional[str]:
-    """Extract listing ID from URL like 'https://www.kv.ee/12345.html'."""
+    """Extract listing ID from URL like '/en/some-title-3447874.html'."""
+    # Match ID at the end of URL before .html
+    match = re.search(r"-(\d+)\.html", url)
+    if match:
+        return match.group(1)
+    # Fallback: any numeric ID before .html
     match = re.search(r"/(\d+)\.html", url)
     if match:
         return match.group(1)
@@ -103,19 +110,21 @@ def extract_listing_id(url: str) -> Optional[str]:
 class KvParser:
     """Parser for kv.ee HTML pages.
 
-    NOTE: Selectors are placeholders and need to be updated based on
-    actual HTML structure once sample pages are captured.
-    """
+    Selectors based on kv.ee HTML structure as of 2026-01.
 
-    # CSS selectors - UPDATE THESE based on actual HTML structure
-    LISTING_CONTAINER = ".listing-item, .object-item, article.result"
-    LISTING_LINK = "a[href*='.html']"
-    LISTING_TITLE = ".title, h2, h3"
-    LISTING_PRICE = ".price, .object-price"
-    LISTING_AREA = ".area, .size, [class*='area']"
-    LISTING_ROOMS = ".rooms, [class*='room']"
-    LISTING_LOCATION = ".location, .address, [class*='location']"
-    LISTING_FLOOR = ".floor, [class*='floor']"
+    Structure:
+        article[data-object-id][data-object-url]
+        ├── div.media (images)
+        ├── div.actions (favorite, gallery)
+        ├── div.description
+        │   └── h2 > a (location/title link)
+        │   └── p.object-excerpt (description with floor info)
+        ├── div.rooms
+        ├── div.area
+        ├── div.add-time
+        └── div.price
+            └── small (price per m²)
+    """
 
     def __init__(self, deal_type: str = "sale"):
         self.deal_type = deal_type
@@ -126,7 +135,8 @@ class KvParser:
         soup = BeautifulSoup(html, "html.parser")
         listings = []
 
-        containers = soup.select(self.LISTING_CONTAINER)
+        # Find all article elements with data-object-id
+        containers = soup.select("article[data-object-id]")
 
         for container in containers:
             listing = self._parse_listing_card(container)
@@ -137,44 +147,84 @@ class KvParser:
 
     def _parse_listing_card(self, container) -> Optional[Listing]:
         """Parse a single listing card from search results."""
-        link_elem = container.select_one(self.LISTING_LINK)
-        if not link_elem:
-            return None
-
-        href = link_elem.get("href", "")
-        if not href.startswith("http"):
-            href = f"{BASE_URL}{href}" if href.startswith("/") else f"{BASE_URL}/{href}"
-
-        listing_id = extract_listing_id(href)
+        # Get ID from data attribute
+        listing_id = container.get("data-object-id")
         if not listing_id:
             return None
 
-        title_elem = container.select_one(self.LISTING_TITLE)
-        title = title_elem.get_text(strip=True) if title_elem else ""
+        # Get URL from data attribute or link
+        url = container.get("data-object-url", "")
+        if not url:
+            link = container.select_one(".description h2 a[href]")
+            url = link.get("href", "") if link else ""
 
-        price_elem = container.select_one(self.LISTING_PRICE)
-        price = normalize_price(price_elem.get_text()) if price_elem else None
+        if url and not url.startswith("http"):
+            url = f"{BASE_URL}{url}" if url.startswith("/") else f"{BASE_URL}/{url}"
 
-        area_elem = container.select_one(self.LISTING_AREA)
-        area = normalize_area(area_elem.get_text()) if area_elem else None
+        # Get title/location from description h2 a
+        title = ""
+        location = None
+        title_link = container.select_one(".description h2 a[href*='.html']")
+        if title_link:
+            location = title_link.get_text(strip=True)
+            title = location  # Use location as title
 
-        rooms_elem = container.select_one(self.LISTING_ROOMS)
+        # Get rooms
+        rooms_elem = container.select_one("div.rooms")
         rooms = normalize_int(rooms_elem.get_text()) if rooms_elem else None
 
-        location_elem = container.select_one(self.LISTING_LOCATION)
-        location = location_elem.get_text(strip=True) if location_elem else None
+        # Get area
+        area_elem = container.select_one("div.area")
+        area = normalize_area(area_elem.get_text()) if area_elem else None
 
-        floor_elem = container.select_one(self.LISTING_FLOOR)
-        floor_text = floor_elem.get_text() if floor_elem else ""
-        floor, total_floors = self._parse_floor(floor_text)
-
+        # Get price (first text node only, not the small element)
+        price = None
         price_per_m2 = None
-        if price and area and area > 0:
+        price_elem = container.select_one("div.price")
+        if price_elem:
+            # Get first text content (main price)
+            for child in price_elem.children:
+                if isinstance(child, NavigableString):
+                    price_text = str(child).strip()
+                    if price_text and "€" in price_text:
+                        price = normalize_price(price_text)
+                        break
+
+            # Get price per m² from small element
+            small = price_elem.select_one("small")
+            if small:
+                price_per_m2 = normalize_area(small.get_text())
+
+        # If no price_per_m2 from HTML, calculate it
+        if price_per_m2 is None and price and area and area > 0:
             price_per_m2 = round(price / area, 2)
 
+        # Get floor info from object-excerpt
+        floor = None
+        total_floors = None
+        excerpt = container.select_one("p.object-excerpt")
+        if excerpt:
+            excerpt_text = excerpt.get_text()
+            floor, total_floors = self._parse_floor(excerpt_text)
+
+        # Get property type from article class
+        property_type = None
+        classes = container.get("class", [])
+        for cls in classes:
+            if cls.startswith("object-type-"):
+                property_type = cls.replace("object-type-", "")
+                break
+
+        # Get build year from excerpt
+        build_year = None
+        if excerpt:
+            year_match = re.search(r"construction year (\d{4})", excerpt.get_text())
+            if year_match:
+                build_year = int(year_match.group(1))
+
         return Listing(
-            id=listing_id,
-            url=href,
+            id=str(listing_id),
+            url=url,
             title=title,
             deal_type=self.deal_type,
             price=price,
@@ -184,27 +234,33 @@ class KvParser:
             floor=floor,
             total_floors=total_floors,
             location=location,
+            property_type=property_type,
+            build_year=build_year,
             first_seen=self.now,
             last_seen=self.now,
             is_active=True,
         )
 
-    def _parse_floor(self, floor_text: str) -> tuple[Optional[int], Optional[int]]:
-        """Parse floor string like '5/9' into (floor, total_floors)."""
-        if not floor_text:
+    def _parse_floor(self, text: str) -> tuple[Optional[int], Optional[int]]:
+        """Parse floor string like 'Floor 3/4' into (floor, total_floors)."""
+        if not text:
             return None, None
-        match = re.search(r"(\d+)\s*/\s*(\d+)", floor_text)
+        # Match "Floor X/Y" pattern
+        match = re.search(r"[Ff]loor\s*(\d+)\s*/\s*(\d+)", text)
         if match:
             return int(match.group(1)), int(match.group(2))
-        single = normalize_int(floor_text)
-        return single, None
+        # Match standalone "X/Y" pattern
+        match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        return None, None
 
     def parse_listing_page(self, html: str, listing_id: str) -> Optional[Listing]:
         """Parse individual listing page for detailed info."""
         soup = BeautifulSoup(html, "html.parser")
 
-        # TODO: Implement detailed parsing once HTML structure is known
-        # This would extract additional fields like build_year, condition, etc.
+        # TODO: Implement detailed parsing for individual listing pages
+        # This would extract additional fields like condition, detailed address, etc.
 
         return None
 
@@ -217,14 +273,14 @@ def parse_pagination(html: str) -> tuple[int, int]:
     soup = BeautifulSoup(html, "html.parser")
 
     # Look for pagination elements
-    # TODO: Update selectors based on actual HTML
-    pagination = soup.select(".pagination a, .pager a, [class*='page'] a")
+    pagination = soup.select(".pagination a, .pager a, .paging a")
 
     current_page = 1
     total_pages = 1
 
     for elem in pagination:
-        if "active" in elem.get("class", []) or "current" in elem.get("class", []):
+        classes = elem.get("class", [])
+        if "active" in classes or "current" in classes:
             current_page = normalize_int(elem.get_text()) or 1
         page_num = normalize_int(elem.get_text())
         if page_num and page_num > total_pages:

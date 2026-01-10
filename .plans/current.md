@@ -17,13 +17,28 @@
 - `docs/...` or `README.md` — document anti-bot handling expectations and fixture provenance.
 
 ## Implementation Steps
-1. [ ] Capture a real kv.ee search results HTML page into `tests/fixtures/kv_ee_search_results.html` (record the URL, query parameters, and capture timestamp).
-2. [ ] Update parser selectors in `src/kv_pet/parser.py` (e.g., functions/classes parsing listing cards and key fields) to match the captured DOM.
-3. [ ] Align `tests/test_parser.py` expectations with the new fixture content, including any updated field names or values.
-4. [ ] Revisit `src/kv_pet/config.py` to define browser-like headers and expose configuration for header overrides or fallback toggles.
-5. [ ] Update `src/kv_pet/fetcher.py` to apply the new headers and define a headless-browser fallback strategy if 403 persists.
-6. [ ] Use the CLI inspect command in `src/kv_pet/cli.py` to validate live connectivity and confirm 403 handling/logging behavior.
-7. [ ] Update documentation (e.g., `README.md` or `docs/`) with notes on anti-bot behavior and fixture provenance.
+1. [x] Capture a real kv.ee search results HTML page into `tests/fixtures/kv_ee_search_results.html` (record the URL, query parameters, and capture timestamp).
+   - Captured manually via browser (Cloudflare JS challenge blocks automated requests)
+2. [x] Update parser selectors in `src/kv_pet/parser.py` to match the captured DOM.
+   - Container: `article[data-object-id]`
+   - Fields: `.rooms`, `.area`, `.price`, `.description h2 a`
+3. [x] Align `tests/test_parser.py` expectations with the new fixture content.
+   - 36 tests passing against real fixture
+4. [x] Revisit `src/kv_pet/config.py` to define browser-like headers and expose configuration for header overrides or fallback toggles.
+   - Added Sec-Fetch-*, Sec-CH-UA-* headers
+   - Added HEADLESS_FALLBACK_ENABLED config
+5. [x] Update `src/kv_pet/fetcher.py` to apply the new headers and define a headless-browser fallback strategy.
+   - Added AntiBlockDetector class
+   - Added HeadlessFetcher with playwright-stealth support
+   - FetchResult dataclass with is_blocked flag
+   - Stealth mode successfully bypasses Cloudflare (tested 2026-01-10)
+6. [x] Use the CLI inspect command in `src/kv_pet/cli.py` to validate live connectivity and confirm 403 handling/logging behavior.
+   - Updated to use FetchResult
+   - Added --no-headless flag
+   - Clear error messages for blocked requests
+7. [x] Update documentation (e.g., `README.md` or `docs/`) with notes on anti-bot behavior and fixture provenance.
+   - Added Anti-Bot Protection section to README
+   - Updated docs/kv_ee_research.md with Cloudflare findings
 ✅ Verify by running: python -m pytest tests/test_parser.py; python -m kv_pet.cli inspect --url "https://kv.ee/" (or equivalent inspect command)
 
 ## Technical Constraints
