@@ -1,58 +1,44 @@
-# Plan: Kv.ee Anti-Bot Handling & Parser Alignment
+# Plan: Listing detail enrichment and CLI filters
 
 ## Context
-- No git remote is configured in this repo, so `git fetch master` cannot be performed here.
-- Live kv.ee requests return HTTP 403 when browser-like headers are missing, indicating anti-bot gating.
-- Parser fixtures are needed to mirror the real search-results DOM before updating selectors.
-- Parser expectations in tests must align with the real-world HTML once captured.
-- Fetcher configuration should include browser-like headers and potentially a headless fallback if 403 persists.
+- Git remote check found no configured remotes; fetch skipped per instruction.
+- Listing parsing currently only extracts basic fields from search results, with detailed listing parsing TODO.
+- CSV schema already includes county, city, district, build_year, and condition but they are not populated from parsing.
+- CLI search parameters include county but omit parish/city and other requested filters.
+- Encoding issues likely stem from response decoding when fetching HTML (e.g., Estonian diacritics).
 
 ## Files to Create/Modify
-- `tests/fixtures/kv_ee_search_results.html` — captured real kv.ee search results HTML fixture for parser tests.
-- `src/kv_pet/parser.py` — update selectors to match real DOM structure (e.g., listing card container, price, address fields).
-- `tests/test_parser.py` — update expected parsed fields to match the new fixture structure.
-- `src/kv_pet/fetcher.py` — ensure request headers emulate a browser and optionally add a headless fallback path.
-- `src/kv_pet/config.py` — define default browser-like headers (user agent, accept, accept-language, etc.) and any fallback config.
-- `src/kv_pet/cli.py` — use the inspect command to validate live-site connectivity and log/handle 403s.
-- `docs/...` or `README.md` — document anti-bot handling expectations and fixture provenance.
+- `.plans/current.md` — record the updated plan and findings.
+- `.plans/archive/2026-01-10.md` — archived copy of the prior plan (verbatim).
+- `src/kv_pet/parser.py` — extend listing parsing to capture county/city/district, build year, condition, and energy certificate.
+- `src/kv_pet/config.py` — extend CSV schema to include energy certificate (and any new listing fields if needed).
+- `src/kv_pet/criteria.py` — add new search criteria fields and query parameter mapping.
+- `src/kv_pet/cli.py` — add CLI arguments for parish/city and new filters.
+- `src/kv_pet/fetcher.py` — ensure HTML decoding preserves Estonian characters.
 
 ## Implementation Steps
-1. [x] Capture a real kv.ee search results HTML page into `tests/fixtures/kv_ee_search_results.html` (record the URL, query parameters, and capture timestamp).
-   - Captured manually via browser (Cloudflare JS challenge blocks automated requests)
-2. [x] Update parser selectors in `src/kv_pet/parser.py` to match the captured DOM.
-   - Container: `article[data-object-id]`
-   - Fields: `.rooms`, `.area`, `.price`, `.description h2 a`
-3. [x] Align `tests/test_parser.py` expectations with the new fixture content.
-   - 36 tests passing against real fixture
-4. [x] Revisit `src/kv_pet/config.py` to define browser-like headers and expose configuration for header overrides or fallback toggles.
-   - Added Sec-Fetch-*, Sec-CH-UA-* headers
-   - Added HEADLESS_FALLBACK_ENABLED config
-5. [x] Update `src/kv_pet/fetcher.py` to apply the new headers and define a headless-browser fallback strategy.
-   - Added AntiBlockDetector class
-   - Added HeadlessFetcher with playwright-stealth support
-   - FetchResult dataclass with is_blocked flag
-   - Stealth mode successfully bypasses Cloudflare (tested 2026-01-10)
-6. [x] Use the CLI inspect command in `src/kv_pet/cli.py` to validate live connectivity and confirm 403 handling/logging behavior.
-   - Updated to use FetchResult
-   - Added --no-headless flag
-   - Clear error messages for blocked requests
-7. [x] Update documentation (e.g., `README.md` or `docs/`) with notes on anti-bot behavior and fixture provenance.
-   - Added Anti-Bot Protection section to README
-   - Updated docs/kv_ee_research.md with Cloudflare findings
-✅ Verify by running: python -m pytest tests/test_parser.py; python -m kv_pet.cli inspect --url "https://kv.ee/" (or equivalent inspect command)
+1. [ ] Review kv.ee HTML for listing cards and/or listing detail pages to identify selectors for county, city, district, build year, condition, and energy certificate.
+2. [ ] Update `Listing` dataclass and `to_dict` mapping to include energy certificate (and any missing fields) while keeping CSV output stable.
+3. [ ] Implement parsing updates in `KvParser` to populate county/city/district, build year, condition, and energy certificate from search results or detail pages.
+4. [ ] Extend CSV schema in `config.CSV_COLUMNS` to include the new field(s) in output order.
+5. [ ] Add search filters to `SearchCriteria` and `to_query_params` for building material, energy certificate, condition, parish, and city.
+6. [ ] Add CLI flags for the new search parameters and wire them into `cmd_search` criteria creation.
+7. [ ] Fix UTF-8/encoding handling in fetcher responses to prevent mis-decoding Estonian characters.
+8. [ ] Run formatting/linting/tests if applicable.
+✅ Verify by running: python -m pytest
 
 ## Technical Constraints
-- Use only browser-like headers (User-Agent, Accept, Accept-Language, Referer) without adding third-party scraping dependencies.
-- Keep fixture data in `tests/fixtures/` and ensure it is a real capture, not synthetic HTML.
-- Avoid altering public CLI semantics unless required for the inspect connectivity check.
+- Keep CSV column order consistent with existing schema, adding new fields only as needed.
+- Avoid changing fetcher behavior in a way that breaks anti-bot detection or headless fallback.
+- Maintain backward compatibility for existing CLI arguments.
 
 ## Dependencies
 - No new dependencies
 
 ## Notes / Edge Cases
-- kv.ee may block based on IP or missing JS; be prepared to document a headless fallback.
-- Ensure fixture updates do not embed sensitive data; consider redacting personally identifiable details if present.
-- Update tests to be deterministic even if the live site changes later.
+- kv.ee may provide location hierarchy and building metadata only on detail pages; if so, consider fetching each listing page when needed.
+- Some listings may not have energy certificate or condition; keep fields optional and leave blank when missing.
+- Ensure encoding fix handles both HTTP headers and HTML meta charset.
 
 ## Claude Code Handoff
 - Save this plan to `.plans/current.md`.
