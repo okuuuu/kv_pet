@@ -38,31 +38,31 @@
 
 ## Implementation Steps
 <!-- Atomic tasks, one per line, in order -->
-1. [ ] Read CLAUDE.md and .plans/current.md to confirm workflow requirements and update this plan file with the final approved steps.
+1. [x] Read CLAUDE.md and .plans/current.md to confirm workflow requirements and update this plan file with the final approved steps.
 
-2. [ ] Create docs/kv_ee_research.md and document initial manual inspection targets: search page URL patterns, query parameters, pagination, listing URLs, and any robots/terms constraints.
+2. [x] Create docs/kv_ee_research.md and document initial manual inspection targets: search page URL patterns, query parameters, pagination, listing URLs, and any robots/terms constraints.
 
-3. [ ] Identify CSV requirements (columns, required fields, data types, deduping key) and record in docs/csv_schema.md.
+3. [x] Identify CSV requirements (columns, required fields, data types, deduping key) and record in docs/csv_schema.md.
 
-4. [ ] Define the high-level package layout under src/kv_pet/ and add a minimal package initializer (no implementation yet).
+4. [x] Define the high-level package layout under src/kv_pet/ and add a minimal package initializer (no implementation yet).
 
-5. [ ] Add config.py scaffolding for base URLs, default headers, throttling settings, and CSV output path.
+5. [x] Add config.py scaffolding for base URLs, default headers, throttling settings, and CSV output path.
 
-6. [ ] Implement criteria.py to normalize/validate search criteria and convert to query parameters.
+6. [x] Implement criteria.py to normalize/validate search criteria and convert to query parameters.
 
-7. [ ] Implement fetcher.py for HTTP GET with session reuse, basic backoff, and rate limiting knobs.
+7. [x] Implement fetcher.py for HTTP GET with session reuse, basic backoff, and rate limiting knobs.
 
-8. [ ] Implement parser.py to extract listing attributes (id/url/title/price/area/location/etc.) from HTML search results.
+8. [x] Implement parser.py to extract listing attributes (id/url/title/price/area/location/etc.) from HTML search results.
 
-9. [ ] Implement csv_store.py to read existing CSV, merge new rows with stable deduping key, and write in schema order.
+9. [x] Implement csv_store.py to read existing CSV, merge new rows with stable deduping key, and write in schema order.
 
-10. [ ] Implement cli.py to accept criteria flags, run fetch+parse, and update CSV.
+10. [x] Implement cli.py to accept criteria flags, run fetch+parse, and update CSV.
 
-11. [ ] Capture representative HTML pages into tests/fixtures/ and add parser tests for core fields.
+11. [x] Capture representative HTML pages into tests/fixtures/ and add parser tests for core fields.
 
-12. [ ] Add CSV store tests covering schema ordering and merge behavior.
+12. [x] Add CSV store tests covering schema ordering and merge behavior.
 
-13. [ ] Update README.md with setup, usage examples, and constraints (rate limits, allowed usage).
+13. [x] Update README.md with setup, usage examples, and constraints (rate limits, allowed usage).
 
 ## Technical Constraints
 - Use plain HTTP requests and HTML parsing first; only introduce a headless browser if the site renders results via JS.
