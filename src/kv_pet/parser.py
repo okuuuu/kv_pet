@@ -134,20 +134,59 @@ class KvParser:
         self.deal_type = deal_type
         self.now = datetime.utcnow().isoformat()
 
+    # Headings that indicate the start of recommended/suggested listings section
+    # These listings should be excluded from main results
+    RECOMMENDED_SECTION_MARKERS = [
+        "kuulutused, mis võiksid sulle huvi pakkuda",  # Estonian
+        "listings that might interest you",  # English
+        "recommended listings",  # English alternative
+        "soovitatud kuulutused",  # Estonian alternative
+    ]
+
     def parse_search_results(self, html: str) -> list[Listing]:
-        """Parse search results page and return list of listings."""
+        """Parse search results page and return list of listings.
+
+        Excludes recommended/suggested listings that appear after the main results.
+        """
         soup = BeautifulSoup(html, "html.parser")
         listings = []
+
+        # Find the position of recommended section heading (if any)
+        recommended_pos = self._find_recommended_section_position(html)
 
         # Find all article elements with data-object-id
         containers = soup.select("article[data-object-id]")
 
         for container in containers:
+            # Skip articles that appear after the recommended section heading
+            if recommended_pos is not None:
+                # Get the article's ID to find its position in the HTML
+                article_id = container.get("data-object-id")
+                if article_id:
+                    article_marker = f'data-object-id="{article_id}"'
+                    article_pos = html.find(article_marker)
+                    if article_pos > recommended_pos:
+                        # This article is in the recommended section, skip it
+                        continue
+
             listing = self._parse_listing_card(container)
             if listing:
                 listings.append(listing)
 
         return listings
+
+    def _find_recommended_section_position(self, html: str) -> Optional[int]:
+        """Find the position of the recommended listings section heading.
+
+        Returns the character position in the HTML where the recommended section
+        starts, or None if no such section exists.
+        """
+        html_lower = html.lower()
+        for marker in self.RECOMMENDED_SECTION_MARKERS:
+            pos = html_lower.find(marker)
+            if pos != -1:
+                return pos
+        return None
 
     def _parse_listing_card(self, container) -> Optional[Listing]:
         """Parse a single listing card from search results."""
