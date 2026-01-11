@@ -84,6 +84,22 @@ https://www.kv.ee/en/search?<parameters>
 | `orderby` | Sort order | `ob` (default) |
 | `keyword` | Address/keyword search | string |
 
+### Advanced Filter Parameters (discovered 2026-01-11)
+
+| Parameter | Description | Values |
+|-----------|-------------|--------|
+| `structure[]` | Building material (array) | `9` (stone), `10` (wooden), `11` (panel), `68` (log) |
+| `c[]` | Condition (array) | `38` (all brand-new), `104` (good), `39` (renovated), `40` (sanitary done), `41` (satisfactory), `42` (sanitary needed), `51` (needs renovating) |
+| `energy_certs` | Energy certificate | Comma-separated: `A,B,C,D,E,F,G,H` |
+| `city[]` | City/district code (array) | Numeric codes (e.g., `1004` for Kristiine) |
+| `parish` | Parish code | Numeric codes (e.g., `1061` for Tallinn) |
+
+**Example URL:**
+```
+https://www.kv.ee/en/search?deal_type=1&county=1&parish=1061&city[0]=1004&energy_certs=B,C,D&structure[0]=9&c[0]=104
+```
+This searches for: sale in Harjumaa, Tallinn/Kristiine, stone house, good condition, energy class B/C/D
+
 ### Listing URL Pattern
 Individual listings follow slug format with ID at end:
 ```
@@ -127,6 +143,27 @@ article[data-object-id][data-object-url]
 - Prices: "165 990 €" or "165\xa0990\xa0€" (non-breaking spaces)
 - Areas: "43.6 m²" or "43.6\xa0m²"
 - Floor: "Floor 3/4" in excerpt text
+
+### Location Hierarchy (from .description h2 a)
+Location string format varies by area:
+- Tallinn: `County, City, District, Sub-district, Street address`
+  - Example: "Harjumaa, Tallinn, Põhja-Tallinn, Kalamaja, Uus-Volta 7-49"
+- Rural: `County, Parish, Village/Town, Area, Street address`
+  - Example: "Harjumaa, Saku vald, Saku, Kirsiõue, Soo tee 5-20"
+
+### Object Excerpt Fields (from p.object-excerpt)
+Excerpt contains comma-separated attributes:
+- Floor: "Floor X/Y" or "2 floor"
+- Ownership: "apartment ownership"
+- Building material: "stone house", "panel house", "wooden house", "brick house"
+- Construction year: "construction year YYYY"
+- Condition: "all brand-new", "renovated", "good condition", "satisfactory condition"
+- Additional: heating type, balcony, amenities
+
+### Energy Certificate
+- NOT visible in search results
+- Available only on individual listing detail pages
+- Would require fetching each listing page separately
 
 ## Rate Limiting Strategy
 - Minimum 2-3 second delay between requests

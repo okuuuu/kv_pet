@@ -70,6 +70,8 @@ CSV_COLUMNS = [
     "property_type",
     "build_year",
     "condition",
+    "building_material",
+    "energy_certificate",
     "first_seen",
     "last_seen",
     "is_active",

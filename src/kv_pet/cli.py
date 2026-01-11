@@ -36,12 +36,19 @@ Examples:
         help="Type of deal (default: sale)",
     )
     search_parser.add_argument("--county", help="County/region filter")
+    search_parser.add_argument("--parish", help="Parish/municipality filter")
+    search_parser.add_argument("--city", help="City filter")
     search_parser.add_argument("--price-min", type=int, help="Minimum price")
     search_parser.add_argument("--price-max", type=int, help="Maximum price")
     search_parser.add_argument("--rooms-min", type=int, help="Minimum rooms")
     search_parser.add_argument("--rooms-max", type=int, help="Maximum rooms")
     search_parser.add_argument("--area-min", type=int, help="Minimum area (m²)")
     search_parser.add_argument("--area-max", type=int, help="Maximum area (m²)")
+    search_parser.add_argument("--build-year-min", type=int, help="Minimum construction year")
+    search_parser.add_argument("--build-year-max", type=int, help="Maximum construction year")
+    search_parser.add_argument("--condition", help="Property condition (new, renovated, good)")
+    search_parser.add_argument("--building-material", help="Building material (stone, panel, wood)")
+    search_parser.add_argument("--energy-certificate", help="Energy certificate class (A, B, C, etc.)")
     search_parser.add_argument("--keyword", help="Keyword/address search")
     search_parser.add_argument(
         "--pages", type=int, default=1, help="Number of pages to fetch (default: 1)"
@@ -90,12 +97,19 @@ def cmd_search(args) -> int:
     criteria = SearchCriteria(
         deal_type=args.deal_type,
         county=args.county,
+        parish=args.parish,
+        city=args.city,
         price_min=args.price_min,
         price_max=args.price_max,
         rooms_min=args.rooms_min,
         rooms_max=args.rooms_max,
         area_min=args.area_min,
         area_max=args.area_max,
+        build_year_min=args.build_year_min,
+        build_year_max=args.build_year_max,
+        condition=args.condition,
+        building_material=args.building_material,
+        energy_certificate=args.energy_certificate,
         keyword=args.keyword,
     )
 

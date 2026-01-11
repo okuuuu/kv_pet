@@ -31,6 +31,8 @@ class Listing:
     property_type: Optional[str] = None
     build_year: Optional[int] = None
     condition: Optional[str] = None
+    building_material: Optional[str] = None
+    energy_certificate: Optional[str] = None
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
     is_active: bool = True
@@ -55,6 +57,8 @@ class Listing:
             "property_type": self.property_type,
             "build_year": self.build_year,
             "condition": self.condition,
+            "building_material": self.building_material,
+            "energy_certificate": self.energy_certificate,
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "is_active": str(self.is_active).lower(),
@@ -215,12 +219,24 @@ class KvParser:
                 property_type = cls.replace("object-type-", "")
                 break
 
-        # Get build year from excerpt
+        # Get build year from excerpt (English: "construction year", Estonian: "ehitusaasta")
         build_year = None
+        condition = None
+        building_material = None
         if excerpt:
-            year_match = re.search(r"construction year (\d{4})", excerpt.get_text())
+            excerpt_text = excerpt.get_text()
+            # Try English pattern first
+            year_match = re.search(r"construction year (\d{4})", excerpt_text, re.IGNORECASE)
+            if not year_match:
+                # Try Estonian pattern
+                year_match = re.search(r"ehitusaasta\s*(\d{4})", excerpt_text, re.IGNORECASE)
             if year_match:
                 build_year = int(year_match.group(1))
+            # Parse condition and building material
+            condition, building_material = self._parse_excerpt(excerpt_text)
+
+        # Parse location into county, city, district
+        county, city, district = self._parse_location(location)
 
         return Listing(
             id=str(listing_id),
@@ -234,26 +250,119 @@ class KvParser:
             floor=floor,
             total_floors=total_floors,
             location=location,
+            county=county,
+            city=city,
+            district=district,
             property_type=property_type,
             build_year=build_year,
+            condition=condition,
+            building_material=building_material,
             first_seen=self.now,
             last_seen=self.now,
             is_active=True,
         )
 
     def _parse_floor(self, text: str) -> tuple[Optional[int], Optional[int]]:
-        """Parse floor string like 'Floor 3/4' into (floor, total_floors)."""
+        """Parse floor string like 'Floor 3/4' or 'Korrus 3/4' into (floor, total_floors)."""
         if not text:
             return None, None
-        # Match "Floor X/Y" pattern
-        match = re.search(r"[Ff]loor\s*(\d+)\s*/\s*(\d+)", text)
+        # Match "Floor X/Y" or "Korrus X/Y" pattern (English/Estonian)
+        match = re.search(r"(?:[Ff]loor|[Kk]orrus)\s*(\d+)\s*/\s*(\d+)", text)
         if match:
             return int(match.group(1)), int(match.group(2))
-        # Match standalone "X/Y" pattern
-        match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+        # Match standalone "X/Y" pattern at start of text
+        match = re.search(r"^(\d+)\s*/\s*(\d+)", text.strip())
         if match:
             return int(match.group(1)), int(match.group(2))
         return None, None
+
+    def _parse_location(
+        self, location: str
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Parse location string into (county, city, district).
+
+        Location formats:
+        - Tallinn: "Harjumaa, Tallinn, Põhja-Tallinn, Kalamaja, Uus-Volta 7-49"
+        - Rural: "Harjumaa, Saku vald, Saku, Kirsiõue, Soo tee 5-20"
+
+        Returns (county, city, district) where:
+        - county: First part (e.g. "Harjumaa")
+        - city: Second part - either city name or parish (e.g. "Tallinn" or "Saku vald")
+        - district: Third part if available (e.g. "Põhja-Tallinn" or "Saku")
+        """
+        if not location:
+            return None, None, None
+
+        parts = [p.strip() for p in location.split(",")]
+        if not parts:
+            return None, None, None
+
+        county = parts[0] if len(parts) > 0 else None
+        city = parts[1] if len(parts) > 1 else None
+        district = parts[2] if len(parts) > 2 else None
+
+        return county, city, district
+
+    def _parse_excerpt(
+        self, excerpt_text: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Parse excerpt text for condition and building material.
+
+        Excerpt format: "Floor X/Y, ownership, building_material, construction year YYYY, condition, ..."
+
+        Handles both English and Estonian text.
+        """
+        if not excerpt_text:
+            return None, None
+
+        condition = None
+        building_material = None
+        text_lower = excerpt_text.lower()
+
+        # Known building materials (English -> Estonian mappings)
+        # Format: (search_term, normalized_value)
+        materials = [
+            ("stone house", "stone"),
+            ("kivimaja", "stone"),
+            ("panel house", "panel"),
+            ("paneelmaja", "panel"),
+            ("paneel", "panel"),
+            ("wooden house", "wood"),
+            ("puitkarkass", "wood"),
+            ("puit", "wood"),
+            ("brick house", "brick"),
+            ("tellismaja", "brick"),
+            ("log house", "log"),
+            ("palkmaja", "log"),
+        ]
+        for search_term, normalized in materials:
+            if search_term in text_lower:
+                building_material = normalized
+                break
+
+        # Known conditions (English and Estonian)
+        # Format: (search_term, normalized_value)
+        conditions = [
+            ("all brand-new", "new"),
+            ("brand-new", "new"),
+            ("uus,", "new"),  # Estonian "new" - comma to avoid partial matches
+            (", uus", "new"),
+            ("renoveeritud", "renovated"),
+            ("renovated", "renovated"),
+            ("good condition", "good"),
+            ("heas seisukorras", "good"),
+            ("hea seisukord", "good"),
+            ("satisfactory condition", "satisfactory"),
+            ("rahuldav", "satisfactory"),
+            ("needs renovation", "needs renovation"),
+            ("vajab remonti", "needs renovation"),
+        ]
+        for search_term, normalized in conditions:
+            if search_term in text_lower:
+                condition = normalized
+                break
+
+        return condition, building_material
 
     def parse_listing_page(self, html: str, listing_id: str) -> Optional[Listing]:
         """Parse individual listing page for detailed info."""

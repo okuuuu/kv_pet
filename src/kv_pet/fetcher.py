@@ -126,6 +126,9 @@ class RateLimitedSession:
         response = self.session.get(
             url, params=params, timeout=REQUEST_TIMEOUT, headers=headers
         )
+        # Force UTF-8 encoding for Estonian characters (õ, ä, ö, ü)
+        # This prevents chardet from mis-detecting the encoding
+        response.encoding = "utf-8"
         return response
 
     def close(self) -> None:
