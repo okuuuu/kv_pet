@@ -14,12 +14,12 @@
 - `tests/fixtures/kv_ee_inactive.html` — fixture used to validate reserved detection (no changes expected unless missing markup).
 
 ## Implementation Steps
-1. [ ] Inspect `kv_ee_search_example.html` to identify the meta table selectors/labels used for condition and energy certificate (e.g., “Seisukord”, “Energiamärgis”) and note any English equivalents.
-2. [ ] Implement or extend `parse_listing_page` (and any helper) to extract condition and energy certificate from the meta table, preferring explicit table values over excerpt heuristics.
-3. [ ] Implement reserved detection in `parse_listing_page` using indicators in `kv_ee_inactive.html` (e.g., “BRONEERITUD” overlay text or “(Broneeritud)” in meta table headers) and map `is_active` to a RESERVED status per CSV expectations.
-4. [ ] Update `Listing`/CSV mapping if needed to represent RESERVED cleanly without breaking existing `is_active` consumers.
-5. [ ] Add tests to `tests/test_parser.py` that parse the fixtures and assert condition, energy certificate, and reserved status values.
-✅ Verify by running: python -m pytest
+1. [x] Inspect `kv_ee_search_example.html` to identify the meta table selectors/labels used for condition and energy certificate (e.g., "Seisukord", "Energiamärgis") and note any English equivalents.
+2. [x] Implement or extend `parse_listing_page` (and any helper) to extract condition and energy certificate from the meta table, preferring explicit table values over excerpt heuristics.
+3. [x] Implement reserved detection in `parse_listing_page` using indicators in `kv_ee_inactive.html` (e.g., "BRONEERITUD" overlay text or "(Broneeritud)" in meta table headers) and map `is_active` to a RESERVED status per CSV expectations.
+4. [x] Update `Listing`/CSV mapping if needed to represent RESERVED cleanly without breaking existing `is_active` consumers.
+5. [x] Add tests to `tests/test_parser.py` that parse the fixtures and assert condition, energy certificate, and reserved status values.
+✅ Verify by running: python -m pytest (48 tests passed)
 
 ## Technical Constraints
 - Avoid brittle selectors; prefer semantic table labels and normalize for Estonian/English variants.
@@ -31,8 +31,17 @@
 
 ## Notes / Edge Cases
 - Listings may omit energy certificate; ensure parser returns `None` rather than incorrect defaults.
-- Condition text may include synonyms (e.g., “Heas korras”, “good condition”); normalize consistently.
-- Reserved status may appear in multiple places; treat any clear “Broneeritud” indicator as reserved even if other fields are present.
+- Condition text may include synonyms (e.g., "Heas korras", "good condition"); normalize consistently.
+- Reserved status may appear in multiple places; treat any clear "Broneeritud" indicator as reserved even if other fields are present.
+
+## Implementation Notes (2026-01-20)
+- Added `parse_listing_page()` method with full meta table extraction
+- Added `_extract_meta_table()` helper to parse `<th>/<td>` pairs from tables
+- Added `_detect_reserved_status()` to check for "(Broneeritud)" or "(Reserved)" patterns
+- Added `_normalize_condition()` and `_normalize_building_material()` for consistent values
+- Added `status` field to `Listing` dataclass (values: "active", "reserved")
+- Fixed deprecation warning: replaced `datetime.utcnow()` with `datetime.now(timezone.utc)`
+- All 48 tests pass including 20 new tests for listing page parsing
 
 ## Claude Code Handoff
 - Save this plan to `.plans/current.md`.

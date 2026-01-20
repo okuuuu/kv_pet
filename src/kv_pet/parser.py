@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from bs4 import BeautifulSoup, NavigableString
@@ -36,6 +36,7 @@ class Listing:
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
     is_active: bool = True
+    status: Optional[str] = None  # e.g., "active", "reserved", "sold"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for CSV export."""
@@ -62,6 +63,7 @@ class Listing:
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "is_active": str(self.is_active).lower(),
+            "status": self.status,
         }
 
 
@@ -132,7 +134,7 @@ class KvParser:
 
     def __init__(self, deal_type: str = "sale"):
         self.deal_type = deal_type
-        self.now = datetime.utcnow().isoformat()
+        self.now = datetime.now(timezone.utc).isoformat()
 
     # Headings that indicate the start of recommended/suggested listings section
     # These listings should be excluded from main results
@@ -404,13 +406,222 @@ class KvParser:
         return condition, building_material
 
     def parse_listing_page(self, html: str, listing_id: str) -> Optional[Listing]:
-        """Parse individual listing page for detailed info."""
+        """Parse individual listing page for detailed info.
+
+        Extracts fields from meta table including:
+        - condition (Seisukord)
+        - energy_certificate (Energiamärgis)
+        - rooms (Tube)
+        - area (Üldpind)
+        - floor/total_floors (Korrus/Korruseid)
+        - build_year (Ehitusaasta)
+        - building_material (Ehitusmaterjal)
+
+        Also detects reserved status from "(Broneeritud)" in header.
+        """
         soup = BeautifulSoup(html, "html.parser")
 
-        # TODO: Implement detailed parsing for individual listing pages
-        # This would extract additional fields like condition, detailed address, etc.
+        # Build a dict of meta table values
+        meta = self._extract_meta_table(soup)
 
-        return None
+        # Detect reserved status from header
+        is_reserved = self._detect_reserved_status(soup, html)
+
+        # Extract condition (Estonian: Seisukord, English: Condition)
+        condition = meta.get("seisukord") or meta.get("condition")
+        if condition:
+            condition = self._normalize_condition(condition)
+
+        # Extract energy certificate (Estonian: Energiamärgis, English: Energy certificate)
+        energy_certificate = meta.get("energiamärgis") or meta.get("energy certificate")
+        if energy_certificate:
+            energy_certificate = energy_certificate.strip()
+
+        # Extract rooms (Estonian: Tube, English: Rooms)
+        rooms_str = meta.get("tube") or meta.get("rooms")
+        rooms = normalize_int(rooms_str) if rooms_str else None
+
+        # Extract area (Estonian: Üldpind, English: Total area)
+        area_str = meta.get("üldpind") or meta.get("total area")
+        area = normalize_area(area_str) if area_str else None
+
+        # Extract floor info (Estonian: Korrus/Korruseid, English: Floor/Floors)
+        floor_str = meta.get("korrus/korruseid") or meta.get("floor/floors") or meta.get("korrus")
+        floor, total_floors = self._parse_floor(floor_str) if floor_str else (None, None)
+
+        # Extract build year (Estonian: Ehitusaasta, English: Construction year)
+        year_str = meta.get("ehitusaasta") or meta.get("construction year") or meta.get("year built")
+        build_year = normalize_int(year_str) if year_str else None
+
+        # Extract building material (Estonian: Ehitusmaterjal, English: Building material)
+        building_material = meta.get("ehitusmaterjal") or meta.get("building material")
+        if building_material:
+            building_material = self._normalize_building_material(building_material)
+
+        # Extract title from page
+        title = ""
+        title_elem = soup.select_one("h1") or soup.select_one(".object-title")
+        if title_elem:
+            title = title_elem.get_text(strip=True)
+
+        # Extract price
+        price = None
+        price_per_m2 = None
+        price_elem = soup.select_one(".object-price, .price-main")
+        if price_elem:
+            price = normalize_price(price_elem.get_text())
+
+        # Calculate price per m2 if we have both
+        if price and area and area > 0:
+            price_per_m2 = round(price / area, 2)
+
+        # Extract location
+        location = None
+        location_elem = soup.select_one(".object-location, .address")
+        if location_elem:
+            location = location_elem.get_text(strip=True)
+
+        county, city, district = self._parse_location(location)
+
+        # Build URL
+        url = f"{BASE_URL}/{listing_id}.html"
+
+        # Determine status
+        status = "reserved" if is_reserved else "active"
+
+        return Listing(
+            id=str(listing_id),
+            url=url,
+            title=title,
+            deal_type=self.deal_type,
+            price=price,
+            price_per_m2=price_per_m2,
+            area_m2=area,
+            rooms=rooms,
+            floor=floor,
+            total_floors=total_floors,
+            location=location,
+            county=county,
+            city=city,
+            district=district,
+            build_year=build_year,
+            condition=condition,
+            building_material=building_material,
+            energy_certificate=energy_certificate,
+            first_seen=self.now,
+            last_seen=self.now,
+            is_active=not is_reserved,
+            status=status,
+        )
+
+    def _extract_meta_table(self, soup: BeautifulSoup) -> dict[str, str]:
+        """Extract key-value pairs from meta table rows.
+
+        Handles both plain text headers and headers containing links.
+        """
+        meta = {}
+
+        # Find all tables, preferring the meta-table
+        tables = soup.select(".meta-table table, table.table-lined")
+        for table in tables:
+            for row in table.select("tr"):
+                th = row.select_one("th")
+                td = row.select_one("td")
+                if th and td:
+                    # Get text from th, stripping any link wrapper
+                    key = th.get_text(strip=True).lower()
+                    # Remove any trailing colon
+                    key = key.rstrip(":")
+                    value = td.get_text(strip=True)
+                    if key and value:
+                        meta[key] = value
+
+        return meta
+
+    def _detect_reserved_status(self, soup: BeautifulSoup, html: str) -> bool:
+        """Detect if listing is reserved (Broneeritud).
+
+        Checks for:
+        - "(Broneeritud)" or "(Reserved)" in header rows
+        - "BRONEERITUD" overlay text
+        """
+        html_lower = html.lower()
+
+        # Check for "(broneeritud)" pattern in HTML
+        if "(broneeritud)" in html_lower or "(reserved)" in html_lower:
+            return True
+
+        # Check for overlay/status text
+        if "broneeritud" in html_lower:
+            # Look for it in specific contexts to avoid false positives
+            overlay = soup.select_one(".object-status, .listing-status, .overlay")
+            if overlay and "broneeritud" in overlay.get_text().lower():
+                return True
+
+            # Check table headers
+            for th in soup.select("th"):
+                th_text = th.get_text().lower()
+                if "broneeritud" in th_text:
+                    return True
+
+        return False
+
+    def _normalize_condition(self, condition: str) -> str:
+        """Normalize condition value to consistent format."""
+        condition_lower = condition.lower().strip()
+
+        # Map Estonian and English conditions to normalized values
+        mappings = {
+            # Good condition
+            "heas korras": "good",
+            "hea seisukord": "good",
+            "heas seisukorras": "good",
+            "good condition": "good",
+            "good": "good",
+            # New
+            "uus": "new",
+            "new": "new",
+            "all brand-new": "new",
+            "brand-new": "new",
+            # Renovated
+            "renoveeritud": "renovated",
+            "renovated": "renovated",
+            # Satisfactory
+            "rahuldav": "satisfactory",
+            "satisfactory condition": "satisfactory",
+            "satisfactory": "satisfactory",
+            # Needs renovation
+            "vajab remonti": "needs renovation",
+            "needs renovation": "needs renovation",
+        }
+
+        return mappings.get(condition_lower, condition_lower)
+
+    def _normalize_building_material(self, material: str) -> str:
+        """Normalize building material to consistent format."""
+        material_lower = material.lower().strip()
+
+        mappings = {
+            "kivimaja": "stone",
+            "stone house": "stone",
+            "stone": "stone",
+            "paneelmaja": "panel",
+            "panel house": "panel",
+            "paneel": "panel",
+            "panel": "panel",
+            "puitkarkass": "wood",
+            "puit": "wood",
+            "wooden house": "wood",
+            "wood": "wood",
+            "tellismaja": "brick",
+            "brick house": "brick",
+            "brick": "brick",
+            "palkmaja": "log",
+            "log house": "log",
+            "log": "log",
+        }
+
+        return mappings.get(material_lower, material_lower)
 
 
 def parse_pagination(html: str) -> tuple[int, int]:

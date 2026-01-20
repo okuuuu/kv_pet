@@ -237,6 +237,162 @@ class TestListing:
         assert data["rooms"] is None
 
 
+class TestListingPageParsing:
+    """Tests for parsing individual listing pages."""
+
+    @pytest.fixture
+    def search_example_html(self):
+        """Load kv_ee_search_example.html fixture."""
+        fixture_file = FIXTURES_DIR / "kv_ee_search_example.html"
+        return fixture_file.read_text()
+
+    @pytest.fixture
+    def inactive_html(self):
+        """Load kv_ee_inactive.html fixture."""
+        fixture_file = FIXTURES_DIR / "kv_ee_inactive.html"
+        return fixture_file.read_text()
+
+    def test_parse_condition_from_meta_table(self, search_example_html):
+        """Test that condition is extracted from meta table."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        # Should extract "Heas korras" and normalize to "good"
+        assert listing is not None
+        assert listing.condition == "good"
+
+    def test_parse_energy_certificate_from_meta_table(self, search_example_html):
+        """Test that energy certificate is extracted from meta table."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        # Should extract "C" from Energiamärgis row
+        assert listing is not None
+        assert listing.energy_certificate == "C"
+
+    def test_parse_reserved_status(self, inactive_html):
+        """Test that reserved status is detected from Broneeritud header."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(inactive_html, "3768144")
+
+        # Should detect "(Broneeritud)" and set is_active=False, status="reserved"
+        assert listing is not None
+        assert listing.is_active is False
+        assert listing.status == "reserved"
+
+    def test_active_listing_has_active_status(self, search_example_html):
+        """Test that non-reserved listings have active status."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        assert listing is not None
+        assert listing.is_active is True
+        assert listing.status == "active"
+
+    def test_parse_rooms_from_meta_table(self, search_example_html):
+        """Test that rooms are extracted from meta table."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        # Should extract "3" from Tube row
+        assert listing is not None
+        assert listing.rooms == 3
+
+    def test_parse_area_from_meta_table(self, search_example_html):
+        """Test that area is extracted from meta table."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        # Should extract "87.3 m²" from Üldpind row
+        assert listing is not None
+        assert listing.area_m2 == 87.3
+
+    def test_parse_floor_from_meta_table(self, search_example_html):
+        """Test that floor info is extracted from meta table."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        # Should extract "4/6" from Korrus/Korruseid row
+        assert listing is not None
+        assert listing.floor == 4
+        assert listing.total_floors == 6
+
+    def test_parse_build_year_from_meta_table(self, search_example_html):
+        """Test that build year is extracted from meta table."""
+        parser = KvParser(deal_type="sale")
+        listing = parser.parse_listing_page(search_example_html, "3759975")
+
+        # Should extract "2008" from Ehitusaasta row
+        assert listing is not None
+        assert listing.build_year == 2008
+
+
+class TestConditionNormalization:
+    """Tests for condition normalization."""
+
+    def test_normalize_heas_korras(self):
+        """Test Estonian 'Heas korras' normalizes to 'good'."""
+        parser = KvParser()
+        assert parser._normalize_condition("Heas korras") == "good"
+        assert parser._normalize_condition("heas korras") == "good"
+
+    def test_normalize_good_condition(self):
+        """Test English 'good condition' normalizes to 'good'."""
+        parser = KvParser()
+        assert parser._normalize_condition("good condition") == "good"
+
+    def test_normalize_uus(self):
+        """Test Estonian 'uus' normalizes to 'new'."""
+        parser = KvParser()
+        assert parser._normalize_condition("uus") == "new"
+
+    def test_normalize_renoveeritud(self):
+        """Test Estonian 'renoveeritud' normalizes to 'renovated'."""
+        parser = KvParser()
+        assert parser._normalize_condition("renoveeritud") == "renovated"
+
+    def test_normalize_vajab_remonti(self):
+        """Test Estonian 'vajab remonti' normalizes to 'needs renovation'."""
+        parser = KvParser()
+        assert parser._normalize_condition("vajab remonti") == "needs renovation"
+
+    def test_unknown_condition_preserved(self):
+        """Test that unknown conditions are preserved as-is."""
+        parser = KvParser()
+        assert parser._normalize_condition("custom condition") == "custom condition"
+
+
+class TestReservedDetection:
+    """Tests for reserved status detection."""
+
+    def test_detect_broneeritud_in_parentheses(self):
+        """Test detection of '(Broneeritud)' in HTML."""
+        parser = KvParser()
+        from bs4 import BeautifulSoup
+
+        html = '<th colspan="2">Müüa korter (Broneeritud)</th>'
+        soup = BeautifulSoup(html, "html.parser")
+        assert parser._detect_reserved_status(soup, html) is True
+
+    def test_detect_reserved_in_parentheses(self):
+        """Test detection of '(Reserved)' in HTML."""
+        parser = KvParser()
+        from bs4 import BeautifulSoup
+
+        html = '<th colspan="2">Sell apartment (Reserved)</th>'
+        soup = BeautifulSoup(html, "html.parser")
+        assert parser._detect_reserved_status(soup, html) is True
+
+    def test_no_reserved_marker(self):
+        """Test that normal listings are not marked as reserved."""
+        parser = KvParser()
+        from bs4 import BeautifulSoup
+
+        html = '<th colspan="2">Müüa korter</th>'
+        soup = BeautifulSoup(html, "html.parser")
+        assert parser._detect_reserved_status(soup, html) is False
+
+
 class TestRecommendedListingsExclusion:
     """Tests for excluding recommended/suggested listings from results."""
 
