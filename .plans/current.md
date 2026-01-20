@@ -12,12 +12,19 @@
 - `tests/test_parser.py` — add a test ensuring recommended listings are excluded from `parse_search_results` output.
 
 ## Implementation Steps
-1. [ ] Inspect the search results HTML (fixture and/or live capture) to locate the DOM structure around the recommended listings heading and identify a reliable boundary or wrapper selector.
-2. [ ] Update `KvParser.parse_search_results` to only collect listing containers that belong to the primary results section, or to stop/skip listing cards that appear after the “Kuulutused, mis võiksid sulle huvi pakkuda” heading.
-3. [ ] Update/add fixture content to include a recommended section so the parser behavior can be validated.
-4. [ ] Add a parser test that loads the fixture and asserts listings under the recommended heading are not returned.
-5. [ ] Run the test suite (or at minimum the parser tests) to confirm coverage of the new behavior.
+1. [x] Inspect the search results HTML (fixture and/or live capture) to locate the DOM structure around the recommended listings heading and identify a reliable boundary or wrapper selector.
+2. [x] Update `KvParser.parse_search_results` to only collect listing containers that belong to the primary results section, or to stop/skip listing cards that appear after the "Kuulutused, mis võiksid sulle huvi pakkuda" heading.
+3. [x] Update/add fixture content to include a recommended section so the parser behavior can be validated.
+4. [x] Add a parser test that loads the fixture and asserts listings under the recommended heading are not returned.
+5. [x] Run the test suite (or at minimum the parser tests) to confirm coverage of the new behavior. (39 tests passed)
 ✅ Verify by running: python -m pytest
+
+## Implementation Notes
+- Recommended section heading: `<h3>Kuulutused, mis võiksid sulle huvi pakkuda</h3>` (Estonian)
+- Also handles English variant: "Listings that might interest you"
+- Solution: Find heading position in HTML, skip articles appearing after that position
+- New fixture: `tests/fixtures/search_with_recommended.html`
+- 3 new tests in `TestRecommendedListingsExclusion` class
 
 ## Technical Constraints
 - Keep parsing resilient to both Estonian and English heading variants if the site localizes the recommended section.

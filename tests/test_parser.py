@@ -235,3 +235,79 @@ class TestListing:
 
         assert data["price"] is None
         assert data["rooms"] is None
+
+
+class TestRecommendedListingsExclusion:
+    """Tests for excluding recommended/suggested listings from results."""
+
+    @pytest.fixture
+    def html_with_recommended(self):
+        """Load HTML fixture with recommended section."""
+        fixture_file = FIXTURES_DIR / "search_with_recommended.html"
+        return fixture_file.read_text()
+
+    def test_excludes_recommended_listings(self, html_with_recommended):
+        """Test that listings after 'huvi pakkuda' heading are excluded."""
+        parser = KvParser(deal_type="sale")
+        listings = parser.parse_search_results(html_with_recommended)
+
+        # Should only get the 2 main listings, not the 2 recommended ones
+        assert len(listings) == 2
+
+        # Verify we got the main listings (IDs 1111111 and 2222222)
+        listing_ids = {l.id for l in listings}
+        assert "1111111" in listing_ids
+        assert "2222222" in listing_ids
+
+        # Verify we excluded the recommended listings (IDs 9999991 and 9999992)
+        assert "9999991" not in listing_ids
+        assert "9999992" not in listing_ids
+
+    def test_no_recommended_section_parses_all(self):
+        """Test that when no recommended section exists, all listings are parsed."""
+        # HTML without recommended section
+        html = """
+        <div class="results">
+            <article data-object-id="1111111" data-object-url="/test-1.html">
+                <div class="description">
+                    <h2><a href="/test-1.html">Test 1</a></h2>
+                </div>
+                <div class="rooms">2</div>
+                <div class="area">50 m²</div>
+                <div class="price">100 000 €</div>
+            </article>
+            <article data-object-id="2222222" data-object-url="/test-2.html">
+                <div class="description">
+                    <h2><a href="/test-2.html">Test 2</a></h2>
+                </div>
+                <div class="rooms">3</div>
+                <div class="area">75 m²</div>
+                <div class="price">150 000 €</div>
+            </article>
+        </div>
+        """
+        parser = KvParser(deal_type="sale")
+        listings = parser.parse_search_results(html)
+
+        assert len(listings) == 2
+
+    def test_english_recommended_heading(self):
+        """Test that English recommended heading is also detected."""
+        html = """
+        <div class="results">
+            <article data-object-id="1111111" data-object-url="/main.html">
+                <div class="description"><h2><a href="/main.html">Main</a></h2></div>
+            </article>
+        </div>
+        <h3>Listings that might interest you</h3>
+        <div class="results">
+            <article data-object-id="9999999" data-object-url="/rec.html">
+                <div class="description"><h2><a href="/rec.html">Recommended</a></h2></div>
+            </article>
+        </div>
+        """
+        parser = KvParser(deal_type="sale")
+        listings = parser.parse_search_results(html)
+
+        assert len(listings) == 1
+        assert listings[0].id == "1111111"
