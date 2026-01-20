@@ -1,42 +1,38 @@
-# Plan: Exclude Recommended Listings From CSV
+# Plan: KV Listing Detail Field Parsing
 
 ## Context
 - Git remote check found no configured remotes, so fetching `master` was skipped per instruction.
-- Search results parsing currently collects all `article[data-object-id]` entries without differentiating recommended sections.
-- Recommended listings appear under the h3 heading “Kuulutused, mis võiksid sulle huvi pakkuda” and should be excluded from CSV output.
-- CSV output is built directly from parsed listings, so filtering needs to happen during parsing or before merging into storage.
+- Condition and energy certificate values are present in the listing detail fixture as meta table rows (e.g., “Seisukord” and “Energiamärgis”) but are not currently parsed into CSV fields.
+- The current condition extraction only inspects search result excerpts, which yields mostly “new” values and misses the detailed condition value.
+- On-hold listings (“Broneeritud”) appear in the inactive fixture via overlay/status text and meta table labels, but `is_active` does not reflect this.
+- New parsing should use the provided fixtures `kv_ee_search_example.html` and `kv_ee_inactive.html` to drive correct extraction and status handling.
 
 ## Files to Create/Modify
-- `src/kv_pet/parser.py` — exclude recommended listings by limiting the parsed containers to the main results section or by skipping listings after the recommended heading.
-- `tests/fixtures/kv_ee_search_results.html` — add or update a fixture segment that includes the recommended section heading and listings for regression coverage.
-- `tests/test_parser.py` — add a test ensuring recommended listings are excluded from `parse_search_results` output.
+- `src/kv_pet/parser.py` — parse condition and energy certificate from listing detail meta table; detect “Broneeritud” status and map to RESERVED.
+- `tests/test_parser.py` — add tests for listing detail parsing (condition, energy certificate) and reserved status detection.
+- `tests/fixtures/kv_ee_search_example.html` — fixture used to validate condition/energy certificate parsing (no changes expected unless missing markup).
+- `tests/fixtures/kv_ee_inactive.html` — fixture used to validate reserved detection (no changes expected unless missing markup).
 
 ## Implementation Steps
-1. [x] Inspect the search results HTML (fixture and/or live capture) to locate the DOM structure around the recommended listings heading and identify a reliable boundary or wrapper selector.
-2. [x] Update `KvParser.parse_search_results` to only collect listing containers that belong to the primary results section, or to stop/skip listing cards that appear after the "Kuulutused, mis võiksid sulle huvi pakkuda" heading.
-3. [x] Update/add fixture content to include a recommended section so the parser behavior can be validated.
-4. [x] Add a parser test that loads the fixture and asserts listings under the recommended heading are not returned.
-5. [x] Run the test suite (or at minimum the parser tests) to confirm coverage of the new behavior. (39 tests passed)
+1. [ ] Inspect `kv_ee_search_example.html` to identify the meta table selectors/labels used for condition and energy certificate (e.g., “Seisukord”, “Energiamärgis”) and note any English equivalents.
+2. [ ] Implement or extend `parse_listing_page` (and any helper) to extract condition and energy certificate from the meta table, preferring explicit table values over excerpt heuristics.
+3. [ ] Implement reserved detection in `parse_listing_page` using indicators in `kv_ee_inactive.html` (e.g., “BRONEERITUD” overlay text or “(Broneeritud)” in meta table headers) and map `is_active` to a RESERVED status per CSV expectations.
+4. [ ] Update `Listing`/CSV mapping if needed to represent RESERVED cleanly without breaking existing `is_active` consumers.
+5. [ ] Add tests to `tests/test_parser.py` that parse the fixtures and assert condition, energy certificate, and reserved status values.
 ✅ Verify by running: python -m pytest
 
-## Implementation Notes
-- Recommended section heading: `<h3>Kuulutused, mis võiksid sulle huvi pakkuda</h3>` (Estonian)
-- Also handles English variant: "Listings that might interest you"
-- Solution: Find heading position in HTML, skip articles appearing after that position
-- New fixture: `tests/fixtures/search_with_recommended.html`
-- 3 new tests in `TestRecommendedListingsExclusion` class
-
 ## Technical Constraints
-- Keep parsing resilient to both Estonian and English heading variants if the site localizes the recommended section.
-- Avoid false negatives by ensuring the main listings section remains fully parsed.
-- Do not change CSV schema or listing model fields for this behavior change.
+- Avoid brittle selectors; prefer semantic table labels and normalize for Estonian/English variants.
+- Keep existing search-results parsing intact; detailed fields should come from listing detail pages when available.
+- Preserve CSV schema expectations while adding RESERVED status handling.
 
 ## Dependencies
 - No new dependencies
 
 ## Notes / Edge Cases
-- The recommended section may not always appear; parsing should behave identically to current output when the heading is absent.
-- Recommended listings might share the same `article[data-object-id]` markup as main listings, so the filter should be based on section context rather than card structure alone.
+- Listings may omit energy certificate; ensure parser returns `None` rather than incorrect defaults.
+- Condition text may include synonyms (e.g., “Heas korras”, “good condition”); normalize consistently.
+- Reserved status may appear in multiple places; treat any clear “Broneeritud” indicator as reserved even if other fields are present.
 
 ## Claude Code Handoff
 - Save this plan to `.plans/current.md`.
